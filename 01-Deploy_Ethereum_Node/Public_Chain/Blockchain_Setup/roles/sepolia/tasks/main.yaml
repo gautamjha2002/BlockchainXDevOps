@@ -1,0 +1,10 @@
+- name: Runnig Tasks
+  include_tasks: "{{ item }}"
+  with_items: 
+    - jwt.yaml
+    - lighthouse.yaml
+    - nethermind.yaml
+
+
+
+

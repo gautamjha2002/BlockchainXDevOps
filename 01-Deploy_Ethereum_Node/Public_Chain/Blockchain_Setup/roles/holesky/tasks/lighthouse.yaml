@@ -1,0 +1,71 @@
+- name: Create Lighthouse Necessary directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ LIGHTHOUSE_DIR }}"
+    - "{{ LIGHTHOUSE_DATA_DIR }}"
+
+- name: Fetch the latest release information from GitHub
+  uri:
+    url: https://api.github.com/repos/sigp/lighthouse/releases/latest
+    return_content: yes
+  register: release_info
+
+- name: Extract the latest release tag
+  set_fact:
+    latest_release: "{{ release_info.json.tag_name }}"
+
+- name: Find the download URL for the x86_64-unknown-linux-gnu.tar.gz asset
+  set_fact:
+    download_url: "{{ release_info.json.assets | selectattr('name', 'search', 'x86_64-unknown-linux-gnu.tar.gz$') | map(attribute='browser_download_url') | first }}"
+
+- name: Check if download URL is found
+  fail:
+    msg: "Failed to find the x86_64-unknown-linux-gnu.tar.gz download URL."
+  when: download_url is not defined
+
+- name: Download the latest x86_64-unknown-linux-gnu.tar.gz release
+  get_url:
+    url: "{{ download_url }}"
+    dest: "{{ LIGHTHOUSE_DIR }}/lighthouse_latest_x86_64-unknown-linux-gnu.tar.gz"
+
+- name: Extract the downloaded tar.gz file
+  unarchive:
+    src: "{{ LIGHTHOUSE_DIR }}/lighthouse_latest_x86_64-unknown-linux-gnu.tar.gz"
+    dest: "{{ LIGHTHOUSE_DIR }}/"
+    remote_src: yes
+
+- name: Output the latest release version and download URL
+  debug:
+    msg: "Downloaded {{ latest_release }} release from {{ download_url }}"
+
+- name: Creating Systemd file for lighthouse
+  copy:
+    dest: /etc/systemd/system/lighthouse.service
+    content: |
+      [Unit]
+      Description=Lighthouse Node
+      Documentation=https://lighthouse-book.sigmaprime.io
+      After=network.target
+
+
+      [Service]
+      LimitNOFILE=1000000
+      Restart=on-failure
+      RestartSec=5s
+      ExecStart=/bin/bash -c 'cd {{ LIGHTHOUSE_DIR }}/ && ./lighthouse --network holesky beacon_node --datadir={{ LIGHTHOUSE_DATA_DIR }} --http --execution-endpoint http://localhost:8551 --execution-jwt {{ JWT_SECRET }}/jwt.hex --checkpoint-sync-url https://checkpoint-sync.holesky.ethpandaops.io/'
+
+      [Install]
+      WantedBy=default.target
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Starting Lighthouse
+  systemd:
+    name: lighthouse
+    state: started
+    enabled: yes

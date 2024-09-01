@@ -1,0 +1,6 @@
+JWT_SECRET: "/home/ubuntu/jwt/secrets"
+NETHERMIND_DIR: "/home/ubuntu/nethermind"
+NETHERMIND_DATA_DIR: "/home/ubuntu/nethermind/data_dir"
+
+LIGHTHOUSE_DIR: "/home/ubuntu/lighthouse"
+LIGHTHOUSE_DATA_DIR: "/home/ubuntu/lighthouse/data_dir"

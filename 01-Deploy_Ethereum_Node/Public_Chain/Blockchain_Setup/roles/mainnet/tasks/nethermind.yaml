@@ -1,0 +1,122 @@
+- name: Create Nethermind's Necessary directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ NETHERMIND_DIR }}"
+    - "{{ NETHERMIND_DATA_DIR }}"
+
+- name: Install Nethermind Dependency
+  apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: yes
+  loop:
+    - libsnappy-dev
+    - libc6-dev
+    - libc6
+    - acl
+    - unzip
+    - jq
+
+- name: Check if Nethermind.Runner file exists
+  stat:
+    path: "{{ NETHERMIND_DIR }}/Nethermind.Runner"
+  register: nethermind_file
+
+- name: Fetch the latest release information from GitHub
+  uri:
+    url: https://api.github.com/repos/NethermindEth/nethermind/releases/latest
+    return_content: yes
+  register: release_info
+  when: not nethermind_file.stat.exists
+
+- name: Extract the latest release tag
+  set_fact:
+    latest_release: "{{ release_info.json.tag_name }}"
+  when: not nethermind_file.stat.exists
+
+- name: Find the download URL for the linux-x64.zip asset
+  set_fact:
+    download_url: "{{ release_info.json.assets | selectattr('name', 'search', 'linux-x64.zip$') | map(attribute='browser_download_url') | first }}"
+  when: not nethermind_file.stat.exists
+
+- name: Check if download URL is found
+  fail:
+    msg: "Failed to find the linux-x64.zip download URL."
+  when: download_url is not defined
+
+- name: Download the latest linux-x64.zip release
+  get_url:
+    url: "{{ download_url }}"
+    dest: "{{ NETHERMIND_DIR }}/nethermind_latest_linux-x64.zip"
+  when: not nethermind_file.stat.exists
+
+- name: Output the latest release version and download URL
+  debug:
+    msg: "Downloaded {{ latest_release }} release from {{ download_url }}"
+  when: not nethermind_file.stat.exists
+
+- name: Extracting Nethermind file
+  unarchive:
+    src: "{{ NETHERMIND_DIR }}/nethermind_latest_linux-x64.zip"
+    dest: "{{ NETHERMIND_DIR }}"
+    remote_src: yes
+  when: not nethermind_file.stat.exists
+
+
+- name: Removing Unnecessary zip file
+  file:
+    path: "{{ NETHERMIND_DIR }}/nethermind-latest.zip"
+    state: absent
+  when: not nethermind_file.stat.exists
+
+- name: Copy Config file to appropriate location 
+  copy: 
+    src: "{{ NETHERMIND_DIR }}/configs/mainnet.cfg"
+    dest: "{{ NETHERMIND_DIR }}/network.cfg"
+    remote_src: yes
+
+- name: Adjusting config file
+  shell: |
+    jq '.JsonRpc.EnabledModules |= ["Eth", "Subscribe", "Trace", "TxPool", "Web3", "Personal", "Proof", "Net", "Parity", "Health", "debug"] |
+      .Metrics += { "ExposePort": 6060, "Enabled": true, "NodeName": "'{{ network }}'" }' "{{ NETHERMIND_DIR }}/configs/mainnet.cfg" > "{{ NETHERMIND_DIR }}/network.cfg" 
+
+- name: Create Environment File
+  copy:
+    dest: "{{ NETHERMIND_DIR }}/.env"
+    content: |
+      NETHERMIND_JSONRPCCONFIG_ENABLED=true
+      NETHERMIND_JSONRPCCONFIG_HOST=0.0.0.0
+      NETHERMIND_HEALTHCHECKSCONFIG_ENABLED=true
+
+- name: Creating Systemd file for Nethermind
+  copy:
+    dest: /etc/systemd/system/nethermind.service
+    content: |
+      [Unit]
+      Description=Nethermind Node
+      Documentation=https://docs.nethermind.io
+      After=network.target
+
+
+      [Service]
+      LimitNOFILE=1000000
+      Restart=on-failure
+      EnvironmentFile={{ NETHERMIND_DIR }}/.env
+      ExecStart=/bin/bash -c 'cd {{ NETHERMIND_DIR }}/ && ./Nethermind.Runner --config {{ NETHERMIND_DIR }}/network.cfg --JsonRpc.JwtSecretFile={{ JWT_SECRET }}/jwt.hex --datadir {{ NETHERMIND_DATA_DIR }}/'
+
+      [Install]
+      WantedBy=default.target
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Starting nethermind
+  systemd:
+    name: nethermind
+    state: started
+    enabled: yes
+

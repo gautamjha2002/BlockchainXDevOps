@@ -1,0 +1,15 @@
+- name: Create Necessary directories
+  file:
+    path: "{{ JWT_SECRET }}"
+    state: directory
+    mode: 0755 
+
+
+- name: Check if jwt.hex file already exists
+  stat:
+    path: "{{ JWT_SECRET }}/jwt.hex"
+  register: jwt_hex_stat
+
+- name: Generate auth secret
+  shell: "openssl rand -hex 32 | tr -d \"\\n\" > {{ JWT_SECRET }}/jwt.hex"
+  when: not jwt_hex_stat.stat.exists
